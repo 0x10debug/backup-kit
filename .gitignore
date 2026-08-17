@@ -1,0 +1,34 @@
+# dev-docs/ — internal working documents, must never be committed
+dev-docs/
+
+# Workspace-level AGENTS.md (internal, not for public repos)
+AGENTS.md
+
+# Dev-doc style numbered files (0001-*.md through 9999-*.md)
+[0-9][0-9][0-9][0-9]-*.md
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# Environment files (contain secrets — never commit)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Backup artifacts and temporary restore directories
+/backup/
+/tmp/mb-restore/
+
+# Test artifacts
+/Volumes/D/mb-test/

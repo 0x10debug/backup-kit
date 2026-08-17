@@ -1,0 +1,24 @@
+# cron/backup-cron.example — Scheduled backup, verify, and drill tasks
+#
+# Install with:
+#   crontab /etc/mb-backup/backup-cron
+# Or merge with existing crontab:
+#   crontab -l | cat - /etc/mb-backup/backup-cron | crontab -
+#
+# Adjust paths if mb is installed elsewhere. The MB_BACKUP_DIR environment
+# variable is exported so the mb CLI can locate its libraries and strategies.
+
+MB_BACKUP_DIR=/opt/mb-backup
+export MB_BACKUP_DIR
+
+# ── Daily backup at 3:00 AM ──────────────────────────────────────────────────
+# Runs a full backup with the configured strategy and applies retention.
+0 3 * * * ${MB_BACKUP_DIR}/mb backup run >> /var/log/mb-backup.log 2>&1
+
+# ── Weekly integrity verification at 4:00 AM on Sundays ──────────────────────
+# Confirms the backup repository is not corrupt and snapshots are readable.
+0 4 * * 0 ${MB_BACKUP_DIR}/mb backup verify >> /var/log/mb-backup.log 2>&1
+
+# ── Monthly recovery drill at 5:00 AM on the 1st ─────────────────────────────
+# Performs a full backup→restore→verify cycle and writes a drill report.
+0 5 1 * * ${MB_BACKUP_DIR}/mb backup drill >> /var/log/mb-backup.log 2>&1

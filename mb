@@ -1,0 +1,555 @@
+#!/usr/bin/env bash
+# mb — backup-kit command-line interface
+# VPS backup strategy toolkit: encrypted, automated, tested recovery.
+#
+# Usage:
+#   mb backup init                 Interactive strategy setup
+#   mb backup init --config .env   Declarative config-driven setup
+#   mb backup run                  Execute a backup now
+#   mb backup status               Show backup status
+#   mb backup verify               Verify backup integrity
+#   mb backup restore --snapshot ID   Restore from a specific snapshot
+#   mb backup restore --latest        Restore from the latest snapshot
+#   mb backup drill                Run a full recovery drill
+#   mb backup cleanup              Apply retention policy (forget + prune)
+#   mb backup export               Export all data for VPS migration
+#   mb backup list                 List all snapshots
+#   mb backup help                 Show help
+
+set -euo pipefail
+
+# ── Resolve script directory ─────────────────────────────────────────────────
+
+MB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export MB_BACKUP_DIR="$MB_SCRIPT_DIR"
+export MB_STRATEGIES_DIR="${MB_SCRIPT_DIR}/strategies"
+export MB_DOCKER_DIR="${MB_SCRIPT_DIR}/docker"
+export MB_CRON_DIR="${MB_SCRIPT_DIR}/cron"
+
+# ── Load libraries ───────────────────────────────────────────────────────────
+
+# shellcheck source=lib/common.sh
+source "${MB_SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=lib/verify.sh
+source "${MB_SCRIPT_DIR}/lib/verify.sh"
+# shellcheck source=lib/drill.sh
+source "${MB_SCRIPT_DIR}/lib/drill.sh"
+
+# ── Help ─────────────────────────────────────────────────────────────────────
+
+mb_show_help() {
+    cat <<'HELP'
+mb — VPS backup strategy toolkit (backup-kit)
+
+Encrypted, automated, tested recovery for self-hosted VPS and Docker workloads.
+Pre-configured strategies for Restic, Kopia, and Borgmatic — just add storage.
+
+USAGE:
+    mb backup <command> [OPTIONS]
+
+COMMANDS:
+    init                       Interactive strategy setup (choose tool + backend)
+    init --config FILE         Declarative setup from a config file
+    run                        Execute a backup now
+    status                     Show last backup time, snapshot count, repo size
+    verify                     Verify backup integrity
+    restore --snapshot ID      Restore from a specific snapshot
+    restore --latest           Restore from the latest snapshot
+    drill                      Run a full recovery drill (backup→restore→verify)
+    cleanup                    Apply retention policy (forget + prune)
+    export                     Export all data for VPS migration
+    list                       List all snapshots
+    help                       Show this help
+
+STRATEGIES:
+    restic-s3      Restic + S3-compatible backend (AWS S3, B2, MinIO)
+    restic-sftp    Restic + SFTP backend (another VPS as storage)
+    kopia-s3       Kopia + S3 backend (with optional Web GUI)
+    borgmatic      Borgmatic (YAML declarative config + Borg)
+
+EXAMPLES:
+    mb backup init                       # Interactive setup
+    mb backup init --config .env         # Declarative setup
+    mb backup run                        # Run a backup
+    mb backup status                     # Check status
+    mb backup restore --latest           # Restore latest snapshot
+    mb backup drill                      # Test your backups work
+    mb backup export                     # Export data for migration
+
+ENVIRONMENT:
+    /etc/mb-backup/env.sh        Shared environment (active strategy, paths)
+    /etc/mb-backup/<strategy>/.env   Strategy credentials (secrets)
+    /var/lib/mb-backup/          State files (last backup, drill reports)
+    /var/log/mb-backup.log       Operation log
+    /data/                       Default app data directory (backed up)
+    /backup/                     Temporary backup artifacts
+
+Learn more: https://github.com/0x10debug/backup-kit
+HELP
+}
+
+# ── Command: init ────────────────────────────────────────────────────────────
+
+mb_cmd_init() {
+    local config_file=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --config) config_file="$2"; shift 2 ;;
+            --help|-h) echo "Usage: mb backup init [--config FILE]"; return 0 ;;
+            *) mb_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    mb_step "Initializing backup strategy"
+    mb_check_root
+
+    if [ -n "$config_file" ]; then
+        # Declarative mode
+        [ -f "$config_file" ] || mb_die "Config file not found: $config_file"
+        mb_info "Loading declarative config from ${config_file}"
+        # shellcheck disable=SC1090
+        source "$config_file"
+        local strategy="${MB_STRATEGY:-}"
+        [ -z "$strategy" ] && mb_die "MB_STRATEGY must be set in config file."
+        mb_strategy_exists "$strategy" || mb_die "Unknown strategy: $strategy"
+        mb_set_active_strategy "$strategy"
+        mb_info "Active strategy: ${strategy}"
+        mb_install_strategy "$strategy" "$config_file"
+    else
+        # Interactive mode
+        local strategy
+        strategy=$(mb_ask_choice "Choose a backup strategy:" "${MB_AVAILABLE_STRATEGIES[@]}") \
+            || mb_die "No strategy selected."
+        mb_set_active_strategy "$strategy"
+        mb_info "Selected strategy: ${strategy}"
+        mb_install_strategy_interactive "$strategy"
+    fi
+
+    # Offer cron install
+    if mb_ask "Install cron schedule (daily backup, weekly verify, monthly drill)?" "y"; then
+        mb_install_cron
+    fi
+
+    mb_success "Backup strategy initialized."
+    mb_detail "Run 'mb backup run' to perform your first backup."
+}
+
+# Install a strategy from a declarative config file
+mb_install_strategy() {
+    local strategy="$1" config_file="$2"
+    local sdir="$(mb_strategy_dir "$strategy")"
+    local dest_env="${MB_CONFIG_DIR}/${strategy}/.env"
+    mb_ensure_dir "$(dirname "$dest_env")"
+    cp "$config_file" "$dest_env"
+    chmod 600 "$dest_env"
+    mb_detail "Config installed to ${dest_env}"
+    # Also deploy strategy.conf (non-secret parameters) if present
+    if [ -f "${sdir}/strategy.conf" ]; then
+        cp "${sdir}/strategy.conf" "${MB_CONFIG_DIR}/${strategy}/strategy.conf"
+        mb_detail "Strategy config installed to ${MB_CONFIG_DIR}/${strategy}/strategy.conf"
+    fi
+    mb_log_file "init: strategy=${strategy} (declarative) config=${dest_env}"
+}
+
+# Interactive strategy installation
+mb_install_strategy_interactive() {
+    local strategy="$1"
+    local sdir="$(mb_strategy_dir "$strategy")"
+    local example="${sdir}/.env.example"
+    local dest_env="${MB_CONFIG_DIR}/${strategy}/.env"
+    mb_ensure_dir "$(dirname "$dest_env")"
+
+    [ -f "$example" ] || mb_die "Missing .env.example for strategy: $strategy"
+
+    mb_step "Configuring ${strategy}"
+    mb_info "Filling in credentials. Press Enter to accept defaults."
+
+    # Copy example as a starting point
+    cp "$example" "$dest_env"
+    chmod 600 "$dest_env"
+
+    case "$strategy" in
+        restic-s3)
+            mb_install_restic_interactive "$dest_env" "s3"
+            ;;
+        restic-sftp)
+            mb_install_restic_interactive "$dest_env" "sftp"
+            ;;
+        kopia-s3)
+            mb_install_kopia_interactive "$dest_env"
+            ;;
+        borgmatic)
+            mb_install_borgmatic_interactive "$dest_env"
+            ;;
+    esac
+
+    mb_detail "Strategy config written to ${dest_env} (mode 600)"
+    # Also deploy strategy.conf (non-secret parameters) if present
+    if [ -f "${sdir}/strategy.conf" ]; then
+        cp "${sdir}/strategy.conf" "${MB_CONFIG_DIR}/${strategy}/strategy.conf"
+        mb_detail "Strategy config installed to ${MB_CONFIG_DIR}/${strategy}/strategy.conf"
+    fi
+    mb_log_file "init: strategy=${strategy} (interactive) config=${dest_env}"
+}
+
+mb_install_restic_interactive() {
+    local envfile="$1" backend="$2"
+    local repo ak sk pw paths
+    if [ "$backend" = "s3" ]; then
+        repo=$(mb_ask_value "RESTIC_REPOSITORY (s3:s3.amazonaws.com/your-bucket)" "s3:s3.amazonaws.com/my-backup-bucket")
+        ak=$(mb_ask_value "AWS_ACCESS_KEY_ID" "")
+        sk=$(mb_ask_secret "AWS_SECRET_ACCESS_KEY")
+    else
+        repo=$(mb_ask_value "RESTIC_REPOSITORY (sftp:user@host:/path/to/repo)" "sftp:user@host:/path/to/repo")
+        sk=$(mb_ask_secret "SFTP password (or leave empty if key-based)")
+    fi
+    pw=$(mb_ask_secret "RESTIC_PASSWORD (encryption passphrase)")
+    paths=$(mb_ask_value "BACKUP_PATHS (directories to back up, space-separated)" "/data")
+
+    mb_write_env "$envfile" \
+        "RESTIC_REPOSITORY=${repo}" \
+        "RESTIC_PASSWORD=${pw}" \
+        "BACKUP_PATHS=${paths}"
+    if [ "$backend" = "s3" ]; then
+        mb_write_env "$envfile" \
+            "AWS_ACCESS_KEY_ID=${ak}" \
+            "AWS_SECRET_ACCESS_KEY=${sk}"
+    else
+        mb_write_env "$envfile" "SFTP_PASSWORD=${sk}"
+    fi
+}
+
+mb_install_kopia_interactive() {
+    local envfile="$1"
+    local repo ak sk pw paths
+    repo=$(mb_ask_value "KOPIA_REPOSITORY (s3-bucket name)" "my-backup-bucket")
+    ak=$(mb_ask_value "AWS_ACCESS_KEY_ID" "")
+    sk=$(mb_ask_secret "AWS_SECRET_ACCESS_KEY")
+    pw=$(mb_ask_secret "KOPIA_PASSWORD (encryption passphrase)")
+    paths=$(mb_ask_value "BACKUP_PATHS" "/data")
+
+    mb_write_env "$envfile" \
+        "KOPIA_REPOSITORY=${repo}" \
+        "AWS_ACCESS_KEY_ID=${ak}" \
+        "AWS_SECRET_ACCESS_KEY=${sk}" \
+        "KOPIA_PASSWORD=${pw}" \
+        "BACKUP_PATHS=${paths}"
+}
+
+mb_install_borgmatic_interactive() {
+    local envfile="$1"
+    local repo pw paths
+    repo=$(mb_ask_value "BORG_REPO (user@host:/path/to/repo)" "user@backup-host:/path/to/repo")
+    pw=$(mb_ask_secret "BORG_PASSPHRASE (encryption passphrase)")
+    paths=$(mb_ask_value "BACKUP_PATHS" "/data")
+
+    mb_write_env "$envfile" \
+        "BORG_REPO=${repo}" \
+        "BORG_PASSPHRASE=${pw}" \
+        "BACKUP_PATHS=${paths}"
+}
+
+# Write key=value lines into an env file (replacing existing keys)
+mb_write_env() {
+    local envfile="$1"; shift
+    local line key value
+    for line in "$@"; do
+        key="${line%%=*}"
+        value="${line#*=}"
+        sed -i "/^${key}=/d" "$envfile" 2>/dev/null || true
+        echo "${key}=\"${value}\"" >> "$envfile"
+    done
+}
+
+# Install cron schedule
+mb_install_cron() {
+    local cron_src="${MB_CRON_DIR}/backup-cron.example"
+    local cron_dest="${MB_CONFIG_DIR}/backup-cron"
+    [ -f "$cron_src" ] || { mb_warn "Cron template not found: $cron_src"; return 1; }
+    mb_ensure_dir "$MB_CONFIG_DIR"
+    cp "$cron_src" "$cron_dest"
+    mb_detail "Cron template installed to ${cron_dest}"
+    mb_info "Enable it with:  crontab ${cron_dest}"
+    mb_info "Or append to root crontab:  crontab -l | cat - ${cron_dest} | crontab -"
+    mb_log_file "init: cron template installed to ${cron_dest}"
+}
+
+# ── Command: run ─────────────────────────────────────────────────────────────
+
+mb_cmd_run() {
+    local strategy="$(mb_get_active_strategy)"
+    [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
+    mb_strategy_exists "$strategy" || mb_die "Strategy not found: $strategy"
+    local script="$(mb_strategy_dir "$strategy")/backup.sh"
+    [ -x "$script" ] || mb_die "Backup script not executable: $script"
+    mb_step "Running backup (strategy: ${strategy})"
+    if "$script"; then
+        mb_mark_backup
+        mb_success "Backup completed."
+        mb_log_file "run: backup OK (strategy=${strategy})"
+    else
+        mb_error "Backup failed."
+        mb_log_file "run: backup FAILED (strategy=${strategy})"
+        return 1
+    fi
+}
+
+# ── Command: status ──────────────────────────────────────────────────────────
+
+mb_cmd_status() {
+    local strategy="$(mb_get_active_strategy)"
+    if [ -z "$strategy" ]; then
+        mb_warn "No active strategy configured. Run 'mb backup init' first."
+        return 0
+    fi
+    mb_load_strategy_env "$strategy"
+    mb_step "Backup status"
+    mb_info "Active strategy : ${strategy}"
+    mb_info "Last backup     : $(mb_last_backup_time)"
+    mb_info "Last drill      : $(mb_last_drill_time)"
+    mb_info "Config          : ${MB_CONFIG_DIR}/${strategy}/.env"
+    mb_info "Log             : ${MB_LOG_FILE}"
+
+    case "$strategy" in
+        restic-s3|restic-sftp)
+            mb_check_restic || return 0
+            mb_detail "Repository: ${RESTIC_REPOSITORY:-<unset>}"
+            if [ -n "${RESTIC_REPOSITORY:-}" ]; then
+                local count size
+                count=$(restic snapshots --json 2>/dev/null | grep -c '"time"' || echo 0)
+                size=$(restic stats --json 2>/dev/null | grep -o '"total_size":[0-9]*' | cut -d: -f2 || echo 0)
+                mb_info "Snapshots        : ${count}"
+                mb_info "Repository size  : $(mb_human_size "${size:-0}")"
+            fi
+            ;;
+        kopia-s3)
+            mb_check_kopia || return 0
+            mb_detail "Repository: ${KOPIA_REPOSITORY:-<unset>}"
+            kopia snapshot list 2>/dev/null || mb_warn "Could not list Kopia snapshots."
+            ;;
+        borgmatic)
+            mb_check_borgmatic || return 0
+            borgmatic info 2>/dev/null || mb_warn "Could not read borgmatic info."
+            ;;
+    esac
+}
+
+# ── Command: verify ──────────────────────────────────────────────────────────
+
+mb_cmd_verify() {
+    mb_verify_integrity
+}
+
+# ── Command: restore ─────────────────────────────────────────────────────────
+
+mb_cmd_restore() {
+    local strategy="$(mb_get_active_strategy)"
+    [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
+    local script="$(mb_strategy_dir "$strategy")/restore.sh"
+    [ -x "$script" ] || mb_die "Restore script not executable: $script"
+    if [ $# -eq 0 ]; then
+        mb_error "Specify --snapshot ID or --latest."
+        echo "Usage: mb backup restore --snapshot ID  |  mb backup restore --latest"
+        return 1
+    fi
+    mb_step "Restoring (strategy: ${strategy})"
+    if "$script" "$@"; then
+        mb_success "Restore completed."
+        mb_log_file "restore: OK (strategy=${strategy}, args=$*)"
+    else
+        mb_error "Restore failed."
+        mb_log_file "restore: FAILED (strategy=${strategy}, args=$*)"
+        return 1
+    fi
+}
+
+# ── Command: drill ───────────────────────────────────────────────────────────
+
+mb_cmd_drill() {
+    mb_drill_run "$@"
+}
+
+# ── Command: cleanup ─────────────────────────────────────────────────────────
+
+mb_cmd_cleanup() {
+    local strategy="$(mb_get_active_strategy)"
+    [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
+    mb_load_strategy_env "$strategy"
+    mb_step "Applying retention policy (strategy: ${strategy})"
+
+    case "$strategy" in
+        restic-s3|restic-sftp)
+            mb_check_restic || return 1
+            local d="${RETENTION_DAILY:-7}" w="${RETENTION_WEEKLY:-4}" m="${RETENTION_MONTHLY:-6}"
+            mb_info "forget --keep-daily ${d} --keep-weekly ${w} --keep-monthly ${m} --prune"
+            if restic forget --keep-daily "$d" --keep-weekly "$w" --keep-monthly "$m" --prune; then
+                mb_success "Retention applied and repository pruned."
+                mb_log_file "cleanup: restic forget+prune OK"
+            else
+                mb_error "Retention cleanup failed."
+                return 1
+            fi
+            ;;
+        kopia-s3)
+            mb_check_kopia || return 1
+            mb_info "Running kopia policy and maintenance ..."
+            kopia policy set --keep-latest "${RETENTION_DAILY:-7}" 2>/dev/null || true
+            kopia maintenance run --full || true
+            mb_success "Kopia retention and maintenance applied."
+            mb_log_file "cleanup: kopia maintenance OK"
+            ;;
+        borgmatic)
+            mb_check_borgmatic || return 1
+            if borgmatic prune; then
+                mb_success "Borgmatic prune completed."
+                mb_log_file "cleanup: borgmatic prune OK"
+            else
+                mb_error "Borgmatic prune failed."
+                return 1
+            fi
+            ;;
+        *)
+            mb_error "Unknown strategy: $strategy"
+            return 1
+            ;;
+    esac
+}
+
+# ── Command: export ──────────────────────────────────────────────────────────
+
+mb_cmd_export() {
+    local strategy="$(mb_get_active_strategy)"
+    [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
+    mb_load_strategy_env "$strategy"
+    local out="${1:-${MB_BACKUP_TMP}/mb-export-$(date '+%Y%m%d-%H%M%S')}"
+    mb_step "Exporting all data for migration"
+    mb_info "Export directory: ${out}"
+    mb_ensure_dir "$out"
+
+    # 1. App data
+    if [ -d "${MB_DATA_DIR}" ]; then
+        mb_info "Copying ${MB_DATA_DIR} ..."
+        cp -a "${MB_DATA_DIR}" "${out}/data" 2>/dev/null || mb_warn "Some files in ${MB_DATA_DIR} could not be copied."
+    else
+        mb_warn "${MB_DATA_DIR} does not exist — nothing to export."
+    fi
+
+    # 2. Compose configs (common locations)
+    local compose_dirs=("${MB_DATA_DIR}/compose" "/opt/compose" "${HOME}/compose")
+    for cdir in "${compose_dirs[@]}"; do
+        if [ -d "$cdir" ]; then
+            mb_info "Including compose configs from ${cdir}"
+            cp -a "$cdir" "${out}/$(basename "$cdir")" 2>/dev/null || true
+        fi
+    done
+
+    # 3. Backup strategy config (without secrets)
+    local strat_dir="${MB_CONFIG_DIR}/${strategy}"
+    if [ -d "$strat_dir" ]; then
+        mb_info "Including strategy config (secrets redacted) ..."
+        mkdir -p "${out}/backup-config"
+        if [ -f "${strat_dir}/.env" ]; then
+            sed -E 's/(PASSWORD|PASSPHRASE|SECRET|KEY)=.*/\1=<redacted>/' "${strat_dir}/.env" \
+                > "${out}/backup-config/.env"
+        fi
+        cp "${strat_dir}/strategy.conf" "${out}/backup-config/" 2>/dev/null || true
+    fi
+
+    # 4. Docker volume backup (if Docker present)
+    if mb_check_docker; then
+        mb_info "Backing up all Docker volumes ..."
+        local vols
+        vols=$(docker volume ls -q 2>/dev/null || true)
+        if [ -n "$vols" ]; then
+            mkdir -p "${out}/volumes"
+            local v
+            for v in $vols; do
+                mb_detail "Exporting volume: ${v}"
+                "${MB_DOCKER_DIR}/volume-backup.sh" "$v" "${out}/volumes" 2>/dev/null \
+                    || mb_warn "Failed to export volume ${v}"
+            done
+        fi
+    fi
+
+    # 5. Create a manifest
+    {
+        echo "mb-backup export manifest"
+        echo "Date    : $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Strategy: ${strategy}"
+        echo "Host    : $(hostname)"
+        echo "Source  : ${MB_DATA_DIR}"
+    } > "${out}/MANIFEST.txt"
+
+    mb_success "Export complete: ${out}"
+    mb_detail "Transfer this directory to the new VPS, then run 'mb backup restore --latest'."
+    mb_log_file "export: ${out} (strategy=${strategy})"
+}
+
+# ── Command: list ────────────────────────────────────────────────────────────
+
+mb_cmd_list() {
+    local strategy="$(mb_get_active_strategy)"
+    [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
+    mb_load_strategy_env "$strategy"
+    mb_step "Listing snapshots (strategy: ${strategy})"
+
+    case "$strategy" in
+        restic-s3|restic-sftp)
+            mb_check_restic || return 1
+            restic snapshots
+            ;;
+        kopia-s3)
+            mb_check_kopia || return 1
+            kopia snapshot list --all
+            ;;
+        borgmatic)
+            mb_check_borgmatic || return 1
+            borgmatic list
+            ;;
+        *)
+            mb_error "Unknown strategy: $strategy"
+            return 1
+            ;;
+    esac
+}
+
+# ── Dispatcher ───────────────────────────────────────────────────────────────
+
+mb_main() {
+    if [ $# -lt 2 ] || [ "$1" != "backup" ]; then
+        # Allow bare `mb help` and `mb version`
+        if [ $# -eq 1 ] && [ "$1" = "help" ]; then
+            mb_show_help
+            exit 0
+        fi
+        if [ $# -eq 1 ] && [ "$1" = "version" ]; then
+            echo "mb (backup-kit) ${MB_BACKUP_VERSION}"
+            exit 0
+        fi
+        mb_show_help
+        exit 1
+    fi
+
+    local subcmd="$2"
+    shift 2
+
+    case "$subcmd" in
+        init)    mb_cmd_init "$@" ;;
+        run)     mb_cmd_run "$@" ;;
+        status)  mb_cmd_status "$@" ;;
+        verify)  mb_cmd_verify "$@" ;;
+        restore) mb_cmd_restore "$@" ;;
+        drill)   mb_cmd_drill "$@" ;;
+        cleanup) mb_cmd_cleanup "$@" ;;
+        export)  mb_cmd_export "$@" ;;
+        list)    mb_cmd_list "$@" ;;
+        help|-h|--help) mb_show_help ;;
+        *)
+            mb_error "Unknown subcommand: backup $subcmd"
+            mb_show_help
+            exit 1
+            ;;
+    esac
+}
+
+mb_main "$@"
