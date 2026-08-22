@@ -22,3 +22,7 @@ export MB_BACKUP_DIR
 # ── Monthly recovery drill at 5:00 AM on the 1st ─────────────────────────────
 # Performs a full backup→restore→verify cycle and writes a drill report.
 0 5 1 * * ${MB_BACKUP_DIR}/mb backup drill >> /var/log/mb-backup.log 2>&1
+
+# ── Monthly 3-2-1 compliance check at 6:00 AM on the 1st ─────────────────────
+# Audits backup configuration against the 3-2-1 rule (3 copies, 2 media, 1 offline).
+0 6 1 * * ${MB_BACKUP_DIR}/mb backup compliance >> /var/log/mb-backup.log 2>&1
