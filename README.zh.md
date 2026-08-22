@@ -24,6 +24,8 @@ backup-kit 用预配置的策略模板回答了这五个问题。选一个策略
 - **Docker volume 备份** — 通过临时 alpine 容器将任意命名 volume 导出为 tar.gz，或直接流式传输到 Restic
 - **Compose 项目备份** — 备份 compose 项目的每个 volume，外加 `compose.yml` 和 `.env`
 - **恢复演练** — `mb backup drill` 执行完整的 备份→恢复→校验 流程，生成通过/失败报告
+- **Checksum 校验** — `mb backup restore-test` 恢复随机快照并比对 SHA-256 校验和，检测静默数据损坏
+- **3-2-1 合规检查** — `mb backup compliance` 审计备份配置是否符合 3-2-1 原则（3 份副本、2 种介质、1 份离线）
 - **VPS 迁移** — `mb backup export` 打包 `/data/`、compose 配置和 Docker volume，用于迁移到新服务器
 - **Cron 模板** — 每日备份、每周校验、每月演练，开箱即用
 
@@ -77,6 +79,8 @@ mb backup verify                     # 验证备份完整性
 mb backup restore --snapshot ID      # 从指定快照恢复
 mb backup restore --latest           # 从最新快照恢复
 mb backup drill                      # 执行恢复演练
+mb backup restore-test               # 恢复快照并校验 checksum
+mb backup compliance                 # 检查 3-2-1 备份合规性
 mb backup cleanup                    # 执行保留策略（forget + prune）
 mb backup export                     # 导出所有数据（用于 VPS 迁移）
 mb backup list                       # 列出所有快照

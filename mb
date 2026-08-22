@@ -11,6 +11,8 @@
 #   mb backup restore --snapshot ID   Restore from a specific snapshot
 #   mb backup restore --latest        Restore from the latest snapshot
 #   mb backup drill                Run a full recovery drill
+#   mb backup restore-test         Restore a snapshot and verify checksums
+#   mb backup compliance           Check 3-2-1 backup compliance
 #   mb backup cleanup              Apply retention policy (forget + prune)
 #   mb backup export               Export all data for VPS migration
 #   mb backup list                 List all snapshots
@@ -56,6 +58,8 @@ COMMANDS:
     restore --snapshot ID      Restore from a specific snapshot
     restore --latest           Restore from the latest snapshot
     drill                      Run a full recovery drill (backup→restore→verify)
+    restore-test               Restore a snapshot and verify checksums (deeper check)
+    compliance                 Check 3-2-1 backup compliance (read-only audit)
     cleanup                    Apply retention policy (forget + prune)
     export                     Export all data for VPS migration
     list                       List all snapshots
@@ -369,6 +373,39 @@ mb_cmd_drill() {
     mb_drill_run "$@"
 }
 
+# ── Command: restore-test ────────────────────────────────────────────────────
+
+mb_cmd_restore_test() {
+    local script="${MB_BACKUP_DIR}/scripts/restore-test.sh"
+    [ -x "$script" ] || mb_die "Restore test script not found or not executable: $script"
+    mb_step "Running restore test (checksum verification)"
+    if "$script" "$@"; then
+        mb_log_file "restore-test: OK (args=$*)"
+    else
+        local rc=$?
+        mb_error "Restore test failed (exit code ${rc})."
+        mb_log_file "restore-test: FAILED (exit=${rc}, args=$*)"
+        return 1
+    fi
+}
+
+# ── Command: compliance ──────────────────────────────────────────────────────
+
+mb_cmd_compliance() {
+    local script="${MB_BACKUP_DIR}/scripts/compliance-check.sh"
+    [ -x "$script" ] || mb_die "Compliance check script not found or not executable: $script"
+    mb_step "Running 3-2-1 compliance check"
+    if "$script" "$@"; then
+        mb_log_file "compliance: PASS"
+    else
+        local rc=$?
+        # Exit code 1 = WARN or FAIL (expected for non-compliant setups)
+        mb_warn "Compliance check reported issues (exit code ${rc})."
+        mb_log_file "compliance: issues found (exit=${rc})"
+        return "$rc"
+    fi
+}
+
 # ── Command: cleanup ─────────────────────────────────────────────────────────
 
 mb_cmd_cleanup() {
@@ -540,6 +577,8 @@ mb_main() {
         verify)  mb_cmd_verify "$@" ;;
         restore) mb_cmd_restore "$@" ;;
         drill)   mb_cmd_drill "$@" ;;
+        restore-test) mb_cmd_restore_test "$@" ;;
+        compliance)   mb_cmd_compliance "$@" ;;
         cleanup) mb_cmd_cleanup "$@" ;;
         export)  mb_cmd_export "$@" ;;
         list)    mb_cmd_list "$@" ;;

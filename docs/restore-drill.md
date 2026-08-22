@@ -122,3 +122,101 @@ backup. Investigate:
 
 Run **verify** weekly (fast, catches corruption) and **drill** monthly
 (slow, proves end-to-end recoverability).
+
+## Restore Test Script (Checksum Verification)
+
+In addition to `mb backup drill`, backup-kit includes a standalone
+**restore test script** that performs a deeper integrity check using
+SHA-256 checksums.
+
+### `scripts/restore-test.sh`
+
+Unlike `mb backup drill` (which runs a fresh backup and compares file count +
+size), `restore-test.sh` restores an **existing** snapshot and compares
+**checksums** of every file between the source and the restored copy. This
+catches silent bit-rot or partial corruption that size-only checks would miss.
+
+```bash
+# Restore a random snapshot and verify all checksums (Restic)
+scripts/restore-test.sh --backend restic --source /data
+
+# Restore a random snapshot and verify all checksums (Kopia)
+scripts/restore-test.sh --backend kopia --source /data
+
+# Restore a specific snapshot
+scripts/restore-test.sh --backend restic --snapshot abc12345 --source /data
+
+# Keep the restored data for manual inspection
+scripts/restore-test.sh --backend restic --keep --source /data
+
+# For large datasets, sample 100 random files instead of checking all
+scripts/restore-test.sh --backend restic --sample 100 --source /data
+
+# Custom target and report paths
+scripts/restore-test.sh --backend restic \
+    --source /data \
+    --target /tmp/my-restore \
+    --report /var/lib/mb-backup/my-report.txt
+```
+
+### Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--backend restic\|kopia` | Backup backend (required) | — |
+| `--snapshot auto\|<ID>` | Snapshot to restore | `auto` (random pick) |
+| `--source PATH` | Source data to compare against | `/data` |
+| `--target PATH` | Restore target directory | `/tmp/mb-restore-test-<ts>` |
+| `--report PATH` | Report file path | `/var/lib/mb-backup/restore-test-<ts>.txt` |
+| `--strategy NAME` | Strategy name for config lookup | auto-detected |
+| `--keep` | Keep restored data after drill | cleaned up |
+| `--sample N` | Verify N random files (0 = all) | `0` (all) |
+
+### How It Works
+
+```
+1. Select snapshot    →  auto-pick a random snapshot, or use the one you specify
+2. Restore            →  restore the snapshot to a temporary directory
+3. Locate data        →  find the restored data root (handles path offsets)
+4. Verify checksums   →  compare SHA-256 of every file (or a random sample)
+5. Generate report    →  write a pass/fail report with mismatch details
+```
+
+### Interpreting the Report
+
+- **PASS** — all file counts match and every checksum is identical.
+- **WARN** — file counts match but extra files were found in the restore
+  (usually harmless, but worth investigating).
+- **FAIL** — files are missing or checksums don't match. The report lists
+  up to 10 mismatched files with their source and restored checksums.
+
+### Drill vs Restore Test
+
+| | `mb backup drill` | `scripts/restore-test.sh` |
+|---|---|---|
+| What it checks | File count + total size | SHA-256 checksum of every file |
+| Runs a backup first? | Yes (fresh backup) | No (uses existing snapshot) |
+| Snapshot selection | Latest | Random (or specified) |
+| Detects bit-rot? | No (size-only) | Yes (checksum comparison) |
+| Speed | Slower (includes backup) | Faster (restore only) |
+| Frequency | Monthly | Monthly (or after major changes) |
+
+### Common Issues
+
+**"No snapshots found in the repository"**
+Run `mb backup run` to create a backup first, or check that your repository
+credentials are correct.
+
+**"Could not locate restored data under target"**
+The script tries several path layouts to find the restored data. If your
+backup tool uses a non-standard restore layout, use `--keep` to preserve the
+restored data and inspect the directory structure manually.
+
+**"Source directory does not exist"**
+The `--source` path must point to the original data that was backed up.
+The script compares files in the source against files in the restore.
+
+**Checksum mismatches on a fresh restore**
+This should never happen. If it does, your backup repository may be corrupt.
+Run `mb backup verify` to check repository integrity, then investigate
+storage backend health.

@@ -24,6 +24,8 @@ backup-kit answers all five with pre-configured strategy templates. Pick a strat
 - **Docker volume backup** — export any named volume as a tar.gz via a temporary alpine container, or stream directly to Restic
 - **Compose project backup** — back up every volume in a compose project plus its `compose.yml` and `.env`
 - **Recovery drills** — `mb backup drill` runs a full backup → restore → verify cycle and writes a pass/fail report
+- **Checksum verification** — `mb backup restore-test` restores a random snapshot and compares SHA-256 checksums to catch silent bit-rot
+- **3-2-1 compliance check** — `mb backup compliance` audits your backup configuration against the 3-2-1 rule (3 copies, 2 media, 1 offline)
 - **VPS migration** — `mb backup export` packages `/data/`, compose configs, and Docker volumes for moving to a new server
 - **Cron templates** — daily backup, weekly verify, monthly drill, ready to install
 
@@ -77,6 +79,8 @@ mb backup verify                     # Verify backup integrity
 mb backup restore --snapshot ID      # Restore from a specific snapshot
 mb backup restore --latest           # Restore from the latest snapshot
 mb backup drill                      # Run a full recovery drill
+mb backup restore-test               # Restore a snapshot and verify checksums
+mb backup compliance                 # Check 3-2-1 backup compliance
 mb backup cleanup                    # Apply retention policy (forget + prune)
 mb backup export                     # Export all data for VPS migration
 mb backup list                       # List all snapshots
