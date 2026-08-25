@@ -26,6 +26,7 @@ backup-kit 用预配置的策略模板回答了这五个问题。选一个策略
 - **恢复演练** — `mb backup drill` 执行完整的 备份→恢复→校验 流程，生成通过/失败报告
 - **Checksum 校验** — `mb backup restore-test` 恢复随机快照并比对 SHA-256 校验和，检测静默数据损坏
 - **3-2-1 合规检查** — `mb backup compliance` 审计备份配置是否符合 3-2-1 原则（3 份副本、2 种介质、1 份离线）
+- **数据库感知备份** — `mb backup db-backup` 在备份前导出 PostgreSQL、MySQL/MariaDB、Redis、MongoDB；通过 Docker 标签自动发现数据库
 - **VPS 迁移** — `mb backup export` 打包 `/data/`、compose 配置和 Docker volume，用于迁移到新服务器
 - **Cron 模板** — 每日备份、每周校验、每月演练，开箱即用
 
@@ -81,6 +82,7 @@ mb backup restore --latest           # 从最新快照恢复
 mb backup drill                      # 执行恢复演练
 mb backup restore-test               # 恢复快照并校验 checksum
 mb backup compliance                 # 检查 3-2-1 备份合规性
+mb backup db-backup --auto           # 备份前导出数据库（Docker 自动发现）
 mb backup cleanup                    # 执行保留策略（forget + prune）
 mb backup export                     # 导出所有数据（用于 VPS 迁移）
 mb backup list                       # 列出所有快照
@@ -152,6 +154,7 @@ Docker volume 不能直接用 `cp` 复制，因为它们存储在 Docker 管理�
 - [备份策略指南](docs/backup-strategy-guide.md) — 如何在 Restic、Kopia、Borgmatic 之间选择；S3 vs SFTP
 - [Docker Volume 备份](docs/docker-volume-backup.md) — Docker volume 备份和恢复的工作原理
 - [恢复演练指南](docs/restore-drill.md) — 为什么要做恢复演练以及怎么做
+- [数据库备份指南](docs/database-backup.md) — 数据库感知备份，备份前导出数据库
 - [迁移指南](docs/migration.md) — 如何将 VPS 数据迁移到新服务器
 
 ## 相关项目

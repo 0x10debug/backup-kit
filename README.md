@@ -26,6 +26,7 @@ backup-kit answers all five with pre-configured strategy templates. Pick a strat
 - **Recovery drills** — `mb backup drill` runs a full backup → restore → verify cycle and writes a pass/fail report
 - **Checksum verification** — `mb backup restore-test` restores a random snapshot and compares SHA-256 checksums to catch silent bit-rot
 - **3-2-1 compliance check** — `mb backup compliance` audits your backup configuration against the 3-2-1 rule (3 copies, 2 media, 1 offline)
+- **Database-aware backup** — `mb backup db-backup` dumps PostgreSQL, MySQL/MariaDB, Redis, and MongoDB before backup; auto-discovers databases via Docker labels
 - **VPS migration** — `mb backup export` packages `/data/`, compose configs, and Docker volumes for moving to a new server
 - **Cron templates** — daily backup, weekly verify, monthly drill, ready to install
 
@@ -81,6 +82,7 @@ mb backup restore --latest           # Restore from the latest snapshot
 mb backup drill                      # Run a full recovery drill
 mb backup restore-test               # Restore a snapshot and verify checksums
 mb backup compliance                 # Check 3-2-1 backup compliance
+mb backup db-backup --auto           # Dump databases before backup (Docker auto-discovery)
 mb backup cleanup                    # Apply retention policy (forget + prune)
 mb backup export                     # Export all data for VPS migration
 mb backup list                       # List all snapshots
@@ -152,6 +154,7 @@ Run `mb backup export` on the old VPS. It packages `/data/` (all app data), comp
 - [Backup Strategy Guide](docs/backup-strategy-guide.md) — How to choose between Restic, Kopia, and Borgmatic; S3 vs SFTP
 - [Docker Volume Backup](docs/docker-volume-backup.md) — How Docker volume backup and restore works
 - [Restore Drill Guide](docs/restore-drill.md) — Why and how to run recovery drills
+- [Database Backup Guide](docs/database-backup.md) — Database-aware backup with pre-backup dumps
 - [Migration Guide](docs/migration.md) — How to migrate VPS data to a new server
 
 ## Related
