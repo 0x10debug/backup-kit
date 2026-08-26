@@ -27,6 +27,8 @@ backup-kit answers all five with pre-configured strategy templates. Pick a strat
 - **Checksum verification** — `mb backup restore-test` restores a random snapshot and compares SHA-256 checksums to catch silent bit-rot
 - **3-2-1 compliance check** — `mb backup compliance` audits your backup configuration against the 3-2-1 rule (3 copies, 2 media, 1 offline)
 - **Database-aware backup** — `mb backup db-backup` dumps PostgreSQL, MySQL/MariaDB, Redis, and MongoDB before backup; auto-discovers databases via Docker labels
+- **S3 backend templates** — ready-to-fill configs for Wasabi, Backblaze B2, and self-hosted MinIO, plus a [comparison guide](docs/backends-comparison.md)
+- **Backend migration** — `mb backup backend-migrate` copies snapshots between S3 backends (AWS S3 → Wasabi → MinIO) via `restic copy`, with `--dry-run` preview
 - **VPS migration** — `mb backup export` packages `/data/`, compose configs, and Docker volumes for moving to a new server
 - **Cron templates** — daily backup, weekly verify, monthly drill, ready to install
 
@@ -34,12 +36,25 @@ backup-kit answers all five with pre-configured strategy templates. Pick a strat
 
 | Strategy | Tool | Backend | Best For |
 |---|---|---|---|
-| [restic-s3](strategies/restic-s3/) | Restic | S3-compatible (AWS S3, B2, MinIO, R2) | Default choice — fast, deduplicated, encrypted |
+| [restic-s3](strategies/restic-s3/) | Restic | S3-compatible (AWS S3, Wasabi, B2, MinIO, R2) | Default choice — fast, deduplicated, encrypted |
 | [restic-sftp](strategies/restic-sftp/) | Restic | SFTP (another VPS) | No cloud account — use a second VPS as storage |
 | [kopia-s3](strategies/kopia-s3/) | Kopia | S3-compatible | Want a Web GUI to browse and restore snapshots |
 | [borgmatic](strategies/borgmatic/) | Borgmatic (Borg) | SSH / SFTP | Prefer YAML declarative config with Borg compression |
 
 All strategies default to **7 daily + 4 weekly + 6 monthly** retention and back up `/data/` by default.
+
+### S3 Backend Templates
+
+The `restic-s3` strategy ships with ready-to-fill templates for common S3-compatible backends. Copy the one you want to `.env` and fill in credentials:
+
+| Template | Backend | Notes |
+|---|---|---|
+| [wasabi.env.example](strategies/restic-s3/wasabi.env.example) | Wasabi | No egress fees; 90-day minimum storage duration |
+| [b2.env.example](strategies/restic-s3/b2.env.example) | Backblaze B2 | Native `b2:` mode (recommended) or S3-compatible mode |
+| [minio.env.example](strategies/restic-s3/minio.env.example) | MinIO (self-hosted) | Includes a [docker-compose](strategies/restic-s3/minio-docker-compose.yml) server template |
+| [.env.example](strategies/restic-s3/.env.example) | AWS S3 (default) | The base template — works with any S3-compatible storage |
+
+See the [S3 backend comparison](docs/backends-comparison.md) for pricing, performance, and migration guidance.
 
 ## Quick Start
 
@@ -83,6 +98,8 @@ mb backup drill                      # Run a full recovery drill
 mb backup restore-test               # Restore a snapshot and verify checksums
 mb backup compliance                 # Check 3-2-1 backup compliance
 mb backup db-backup --auto           # Dump databases before backup (Docker auto-discovery)
+mb backup backend-migrate --from-env wasabi.env --to-env minio.env --dry-run
+                                     # Preview migrating snapshots between backends
 mb backup cleanup                    # Apply retention policy (forget + prune)
 mb backup export                     # Export all data for VPS migration
 mb backup list                       # List all snapshots
@@ -155,6 +172,7 @@ Run `mb backup export` on the old VPS. It packages `/data/` (all app data), comp
 - [Docker Volume Backup](docs/docker-volume-backup.md) — How Docker volume backup and restore works
 - [Restore Drill Guide](docs/restore-drill.md) — Why and how to run recovery drills
 - [Database Backup Guide](docs/database-backup.md) — Database-aware backup with pre-backup dumps
+- [S3 Backend Comparison](docs/backends-comparison.md) — Wasabi vs B2 vs MinIO vs AWS S3: pricing, retention, migration
 - [Migration Guide](docs/migration.md) — How to migrate VPS data to a new server
 
 ## Related

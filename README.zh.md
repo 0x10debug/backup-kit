@@ -27,6 +27,8 @@ backup-kit 用预配置的策略模板回答了这五个问题。选一个策略
 - **Checksum 校验** — `mb backup restore-test` 恢复随机快照并比对 SHA-256 校验和，检测静默数据损坏
 - **3-2-1 合规检查** — `mb backup compliance` 审计备份配置是否符合 3-2-1 原则（3 份副本、2 种介质、1 份离线）
 - **数据库感知备份** — `mb backup db-backup` 在备份前导出 PostgreSQL、MySQL/MariaDB、Redis、MongoDB；通过 Docker 标签自动发现数据库
+- **S3 后端模板** — Wasabi、Backblaze B2、自建 MinIO 的即用配置，附 [后端对比文档](docs/backends-comparison.md)
+- **后端迁移** — `mb backup backend-migrate` 通过 `restic copy` 在 S3 后端间复制快照（AWS S3 → Wasabi → MinIO），支持 `--dry-run` 预览
 - **VPS 迁移** — `mb backup export` 打包 `/data/`、compose 配置和 Docker volume，用于迁移到新服务器
 - **Cron 模板** — 每日备份、每周校验、每月演练，开箱即用
 
@@ -34,12 +36,25 @@ backup-kit 用预配置的策略模板回答了这五个问题。选一个策略
 
 | 策略 | 工具 | 后端 | 适用场景 |
 |---|---|---|---|
-| [restic-s3](strategies/restic-s3/) | Restic | S3 兼容（AWS S3、B2、MinIO、R2） | 默认选择——快速、去重、加密 |
+| [restic-s3](strategies/restic-s3/) | Restic | S3 兼容（AWS S3、Wasabi、B2、MinIO、R2） | 默认选择——快速、去重、加密 |
 | [restic-sftp](strategies/restic-sftp/) | Restic | SFTP（另一台 VPS） | 没有云存储账号——用第二台 VPS 做存储 |
 | [kopia-s3](strategies/kopia-s3/) | Kopia | S3 兼容 | 想要 Web GUI 浏览和恢复快照 |
 | [borgmatic](strategies/borgmatic/) | Borgmatic（Borg） | SSH / SFTP | 偏好 YAML 声明式配置和 Borg 压缩 |
 
 所有策略默认保留 **7 个每日 + 4 个每周 + 6 个每月** 快照，默认备份 `/data/`。
+
+### S3 后端模板
+
+`restic-s3` 策略附带常见 S3 兼容后端的即用模板，复制你需要的那个为 `.env` 并填入凭证：
+
+| 模板 | 后端 | 说明 |
+|---|---|---|
+| [wasabi.env.example](strategies/restic-s3/wasabi.env.example) | Wasabi | 无出口费；90 天最短存储期 |
+| [b2.env.example](strategies/restic-s3/b2.env.example) | Backblaze B2 | 原生 `b2:` 模式（推荐）或 S3 兼容模式 |
+| [minio.env.example](strategies/restic-s3/minio.env.example) | MinIO（自建） | 含 [docker-compose](strategies/restic-s3/minio-docker-compose.yml) 服务端模板 |
+| [.env.example](strategies/restic-s3/.env.example) | AWS S3（默认） | 基础模板——兼容任意 S3 存储 |
+
+详见 [S3 后端对比文档](docs/backends-comparison.md)（价格、性能、迁移方法）。
 
 ## 快速开始
 
@@ -83,6 +98,8 @@ mb backup drill                      # 执行恢复演练
 mb backup restore-test               # 恢复快照并校验 checksum
 mb backup compliance                 # 检查 3-2-1 备份合规性
 mb backup db-backup --auto           # 备份前导出数据库（Docker 自动发现）
+mb backup backend-migrate --from-env wasabi.env --to-env minio.env --dry-run
+                                     # 预览在后端间迁移快照
 mb backup cleanup                    # 执行保留策略（forget + prune）
 mb backup export                     # 导出所有数据（用于 VPS 迁移）
 mb backup list                       # 列出所有快照
@@ -155,6 +172,7 @@ Docker volume 不能直接用 `cp` 复制，因为它们存储在 Docker 管理�
 - [Docker Volume 备份](docs/docker-volume-backup.md) — Docker volume 备份和恢复的工作原理
 - [恢复演练指南](docs/restore-drill.md) — 为什么要做恢复演练以及怎么做
 - [数据库备份指南](docs/database-backup.md) — 数据库感知备份，备份前导出数据库
+- [S3 后端对比](docs/backends-comparison.md) — Wasabi vs B2 vs MinIO vs AWS S3：价格、保留策略、迁移方法
 - [迁移指南](docs/migration.md) — 如何将 VPS 数据迁移到新服务器
 
 ## 相关项目

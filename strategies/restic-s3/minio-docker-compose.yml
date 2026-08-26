@@ -1,0 +1,72 @@
+# strategies/restic-s3/minio-docker-compose.yml
+# Self-hosted MinIO S3 server for use as a Restic backup backend.
+#
+# Pinned image tag (do NOT use :latest in production):
+#   minio:RELEASE.2024-10-13T13-34-11Z
+#
+# Ports:
+#   9000  S3 API   (what Restic talks to)
+#   9001  Web console (admin UI)
+#
+# Usage:
+#   1. Copy this file to your MinIO host, e.g. /opt/minio/compose.yml
+#   2. Create a .env next to it with MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+#      (see MINIO_ENV_EXAMPLE below) — or set them in the host shell.
+#   3. Prepare the data directory: mkdir -p /data/minio && chown 1000:1000 /data/minio
+#   4. (Production) Provide TLS certs at /opt/minio/certs/ (public.crt + private.key)
+#      so the API endpoint is https. Restic requires TLS for S3 endpoints.
+#   5. docker compose up -d
+#   6. Open the console at http://<host>:9001, create a bucket and a dedicated
+#      backup user (scoped to that bucket), then use those keys in minio.env.example.
+#
+# MINIO_ENV_EXAMPLE (place in /opt/minio/.env, chmod 600, never commit):
+#   MINIO_ROOT_USER=minio-admin
+#   MINIO_ROOT_PASSWORD=<long-random-string>
+#
+# Distributed mode (optional, for durability across multiple drives/nodes):
+#   - Run one minio service per node, all sharing the same MINIO_VOLUMES path
+#     expressed as a host:drive list, e.g. MINIO_VOLUMES="http://minio{1...4}/data/minio"
+#   - Erasure-coding gives bit-rot protection and tolerates node failures.
+#   - See https://min.io/docs/minio/linux/operations/install-deploy-manage/deploy-minio-distributed.html
+
+services:
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # Root credentials — used only for initial console login / bucket setup.
+      # Create a separate scoped user for Restic; do not hand these to backup jobs.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme-long-random-string}
+      # Browser/console access toggle (set to off to disable the web UI).
+      MINIO_BROWSER: "on"
+    ports:
+      - "9000:9000"   # S3 API — Restic connects here
+      - "9001:9001"   # Web console
+    volumes:
+      - minio-data:/data
+      # Mount TLS certs read-only to enable https on the API.
+      # Provide public.crt and private.key (PEM). Comment out for testing only.
+      - /opt/minio/certs:/root/.minio/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  minio-data:
+    # By default a Docker named volume. For production, bind-mount a real path:
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /data/minio
