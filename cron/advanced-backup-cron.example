@@ -1,0 +1,64 @@
+# cron/advanced-backup-cron.example — Scheduled advanced backup tasks
+#
+# Install with:
+#   crontab /etc/mb-backup/advanced-backup-cron
+# Or merge with existing crontab:
+#   crontab -l | cat - /etc/mb-backup/advanced-backup-cron | crontab -
+#
+# This template schedules Docker volume backups, Elasticsearch index
+# exports, and InfluxDB backups alongside the regular backup pipeline.
+# Adjust paths if mb is installed elsewhere. The MB_BACKUP_DIR environment
+# variable is exported so the mb CLI can locate its libraries and strategies.
+
+MB_BACKUP_DIR=/opt/mb-backup
+export MB_BACKUP_DIR
+
+# ── Daily database dumps at 2:50 AM ──────────────────────────────────────────
+# Dumps all auto-discovered databases (Postgres, MySQL, Redis, Mongo).
+# --keep ensures the dumps survive until the 3:00 AM backup captures them.
+50 2 * * * ${MB_BACKUP_DIR}/mb backup db-backup --auto --keep >> /var/log/mb-backup.log 2>&1
+
+# ── Daily Elasticsearch export at 2:52 AM ────────────────────────────────────
+# Exports all auto-discovered ES indices via elasticdump.
+# Output goes to /backup/es-dumps-<ts>/ (included in the 3:00 AM backup).
+52 2 * * * ${MB_BACKUP_DIR}/lib/es-dump.sh --auto >> /var/log/mb-backup.log 2>&1
+
+# ── Daily InfluxDB backup at 2:55 AM ─────────────────────────────────────────
+# Backs up all auto-discovered InfluxDB instances (1.x and 2.x).
+# Output goes to /backup/influxdb-backups-<ts>/ (included in the 3:00 AM backup).
+# For InfluxDB 2.x, set INFLUX_TOKEN and INFLUX_ORG in /etc/mb-backup/env.sh
+55 2 * * * ${MB_BACKUP_DIR}/lib/influxdb-dump.sh --auto >> /var/log/mb-backup.log 2>&1
+
+# ── Daily Docker volume backup at 2:58 AM ────────────────────────────────────
+# Backs up all Docker volumes (excluding system volumes) to /backup/.
+# --keep preserves archives for the 3:00 AM backup to capture.
+# Archives are gzip-compressed by default; add --compress zstd for faster
+# compression, or --encrypt age --age-recipient <key> for encryption.
+58 2 * * * ${MB_BACKUP_DIR}/mb backup volume-backup --all --keep \
+    --exclude '*meta*' --exclude 'docker-_' \
+    >> /var/log/mb-backup.log 2>&1
+
+# ── Daily backup at 3:00 AM ──────────────────────────────────────────────────
+# Runs a full backup with the configured strategy. The dump directories
+# (/backup/db-dumps-*, /backup/es-dumps-*, /backup/influxdb-backups-*,
+# /backup/volume-backups-*) are included if they match your BACKUP_PATHS
+# or are added as extra paths. After the backup, clean up all temp dirs.
+0 3 * * * ${MB_BACKUP_DIR}/mb backup run >> /var/log/mb-backup.log 2>&1 && \
+    rm -rf /backup/db-dumps-* /backup/es-dumps-* \
+           /backup/influxdb-backups-* /backup/volume-backups-*
+
+# ── Weekly integrity verification at 4:00 AM on Sundays ──────────────────────
+0 4 * * 0 ${MB_BACKUP_DIR}/mb backup verify >> /var/log/mb-backup.log 2>&1
+
+# ── Monthly recovery drill at 5:00 AM on the 1st ─────────────────────────────
+0 5 1 * * ${MB_BACKUP_DIR}/mb backup drill >> /var/log/mb-backup.log 2>&1
+
+# ── Monthly 3-2-1 compliance check at 6:00 AM on the 1st ─────────────────────
+0 6 1 * * ${MB_BACKUP_DIR}/mb backup compliance >> /var/log/mb-backup.log 2>&1
+
+# ── Weekly Elasticsearch snapshot (alternative to elasticdump) ───────────────
+# If using the snapshot API method instead of elasticdump, run snapshots
+# weekly (they're incremental and more efficient for large clusters).
+# Uncomment and configure your snapshot repository name:
+# 0 3 * * 6 ${MB_BACKUP_DIR}/lib/es-dump.sh --auto --method snapshot \
+#     --snapshot-repo my_backup >> /var/log/mb-backup.log 2>&1

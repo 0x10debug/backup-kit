@@ -27,6 +27,9 @@ backup-kit answers all five with pre-configured strategy templates. Pick a strat
 - **Checksum verification** — `mb backup restore-test` restores a random snapshot and compares SHA-256 checksums to catch silent bit-rot
 - **3-2-1 compliance check** — `mb backup compliance` audits your backup configuration against the 3-2-1 rule (3 copies, 2 media, 1 offline)
 - **Database-aware backup** — `mb backup db-backup` dumps PostgreSQL, MySQL/MariaDB, Redis, and MongoDB before backup; auto-discovers databases via Docker labels
+- **Advanced volume backup** — `mb backup volume-backup` backs up Docker volumes with gzip/zstd/none compression, age/gpg encryption, exclude patterns, and direct Restic streaming
+- **Elasticsearch-aware backup** — `lib/es-dump.sh` exports ES indices via elasticdump or Snapshot API; auto-discovers clusters via Docker labels
+- **InfluxDB-aware backup** — `lib/influxdb-dump.sh` backs up InfluxDB 1.x and 2.x databases/buckets; auto-discovers instances via Docker labels
 - **S3 backend templates** — ready-to-fill configs for Wasabi, Backblaze B2, and self-hosted MinIO, plus a [comparison guide](docs/backends-comparison.md)
 - **Backend migration** — `mb backup backend-migrate` copies snapshots between S3 backends (AWS S3 → Wasabi → MinIO) via `restic copy`, with `--dry-run` preview
 - **VPS migration** — `mb backup export` packages `/data/`, compose configs, and Docker volumes for moving to a new server
@@ -98,6 +101,9 @@ mb backup drill                      # Run a full recovery drill
 mb backup restore-test               # Restore a snapshot and verify checksums
 mb backup compliance                 # Check 3-2-1 backup compliance
 mb backup db-backup --auto           # Dump databases before backup (Docker auto-discovery)
+mb backup volume-backup --all        # Back up all Docker volumes (gzip, auto-cleanup)
+mb backup volume-backup --volume my-data --compress zstd --encrypt age --age-recipient age1...
+                                     # Back up a volume with zstd + age encryption
 mb backup backend-migrate --from-env wasabi.env --to-env minio.env --dry-run
                                      # Preview migrating snapshots between backends
 mb backup cleanup                    # Apply retention policy (forget + prune)
@@ -172,6 +178,7 @@ Run `mb backup export` on the old VPS. It packages `/data/` (all app data), comp
 - [Docker Volume Backup](docs/docker-volume-backup.md) — How Docker volume backup and restore works
 - [Restore Drill Guide](docs/restore-drill.md) — Why and how to run recovery drills
 - [Database Backup Guide](docs/database-backup.md) — Database-aware backup with pre-backup dumps
+- [Advanced Backup Guide](docs/advanced-backup.md) — Docker volume backup, Elasticsearch & InfluxDB, encryption (age/gpg)
 - [S3 Backend Comparison](docs/backends-comparison.md) — Wasabi vs B2 vs MinIO vs AWS S3: pricing, retention, migration
 - [Migration Guide](docs/migration.md) — How to migrate VPS data to a new server
 

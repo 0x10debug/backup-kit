@@ -14,6 +14,7 @@
 #   mb backup restore-test         Restore a snapshot and verify checksums
 #   mb backup compliance           Check 3-2-1 backup compliance
 #   mb backup db-backup            Dump databases before backup (Postgres/MySQL/Redis/Mongo)
+#   mb backup volume-backup        Back up Docker volumes (gzip/zstd/none, age/gpg encryption)
 #   mb backup backend-migrate      Migrate snapshots between S3 backends (restic copy)
 #   mb backup cleanup              Apply retention policy (forget + prune)
 #   mb backup export               Export all data for VPS migration
@@ -63,6 +64,7 @@ COMMANDS:
     restore-test               Restore a snapshot and verify checksums (deeper check)
     compliance                 Check 3-2-1 backup compliance (read-only audit)
     db-backup                  Dump databases before backup (Postgres/MySQL/Redis/Mongo)
+    volume-backup              Back up Docker volumes (gzip/zstd/none, age/gpg encryption, Restic streaming)
     backend-migrate            Migrate snapshots between S3 backends (restic copy)
     cleanup                    Apply retention policy (forget + prune)
     export                     Export all data for VPS migration
@@ -434,6 +436,22 @@ mb_cmd_db_backup() {
     fi
 }
 
+# ── Command: volume-backup ───────────────────────────────────────────────────
+
+mb_cmd_volume_backup() {
+    local script="${MB_BACKUP_DIR}/scripts/volume-backup.sh"
+    [ -x "$script" ] || mb_die "Volume backup script not found or not executable: $script"
+    mb_step "Running Docker volume backup"
+    if "$script" "$@"; then
+        mb_log_file "volume-backup: OK (args=$*)"
+    else
+        local rc=$?
+        mb_error "Volume backup failed (exit code ${rc})."
+        mb_log_file "volume-backup: FAILED (exit=${rc}, args=$*)"
+        return 1
+    fi
+}
+
 # ── Command: backend-migrate ─────────────────────────────────────────────────
 
 mb_cmd_backend_migrate() {
@@ -624,6 +642,7 @@ mb_main() {
         restore-test) mb_cmd_restore_test "$@" ;;
         compliance)   mb_cmd_compliance "$@" ;;
         db-backup)    mb_cmd_db_backup "$@" ;;
+        volume-backup) mb_cmd_volume_backup "$@" ;;
         backend-migrate) mb_cmd_backend_migrate "$@" ;;
         cleanup) mb_cmd_cleanup "$@" ;;
         export)  mb_cmd_export "$@" ;;
