@@ -15,10 +15,13 @@ set -euo pipefail
 # Execute a full recovery drill for the active strategy.
 # Optional args: --strategy NAME, --source PATH, --target PATH
 mb_drill_run() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     local source="${MB_DATA_DIR}"
-    local target="${MB_RESTORE_DIR}/drill-$(date '+%Y%m%d-%H%M%S')"
-    local report="${MB_STATE_DIR}/drill-report-$(date '+%Y%m%d-%H%M%S').txt"
+    local target
+    target="${MB_RESTORE_DIR}/drill-$(date '+%Y%m%d-%H%M%S')"
+    local report
+    report="${MB_STATE_DIR}/drill-report-$(date '+%Y%m%d-%H%M%S').txt"
 
     # Parse args
     while [ $# -gt 0 ]; do
@@ -49,7 +52,8 @@ mb_drill_run() {
 
     # ── 1. Run a backup ──────────────────────────────────────────────────────
     mb_step "Step 1/5 — Running a fresh backup"
-    local backup_script="$(mb_strategy_dir "$strategy")/backup.sh"
+    local backup_script
+    backup_script="$(mb_strategy_dir "$strategy")/backup.sh"
     if [ ! -x "$backup_script" ]; then
         mb_error "Backup script not executable: $backup_script"
         return 1
@@ -63,7 +67,8 @@ mb_drill_run() {
 
     # ── 2. Restore to temp directory ─────────────────────────────────────────
     mb_step "Step 2/5 — Restoring latest snapshot to ${target}"
-    local restore_script="$(mb_strategy_dir "$strategy")/restore.sh"
+    local restore_script
+    restore_script="$(mb_strategy_dir "$strategy")/restore.sh"
     if [ ! -x "$restore_script" ]; then
         mb_error "Restore script not executable: $restore_script"
         return 1

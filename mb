@@ -155,7 +155,8 @@ mb_cmd_init() {
 # Install a strategy from a declarative config file
 mb_install_strategy() {
     local strategy="$1" config_file="$2"
-    local sdir="$(mb_strategy_dir "$strategy")"
+    local sdir
+    sdir="$(mb_strategy_dir "$strategy")"
     local dest_env="${MB_CONFIG_DIR}/${strategy}/.env"
     mb_ensure_dir "$(dirname "$dest_env")"
     cp "$config_file" "$dest_env"
@@ -172,7 +173,8 @@ mb_install_strategy() {
 # Interactive strategy installation
 mb_install_strategy_interactive() {
     local strategy="$1"
-    local sdir="$(mb_strategy_dir "$strategy")"
+    local sdir
+    sdir="$(mb_strategy_dir "$strategy")"
     local example="${sdir}/.env.example"
     local dest_env="${MB_CONFIG_DIR}/${strategy}/.env"
     mb_ensure_dir "$(dirname "$dest_env")"
@@ -295,10 +297,12 @@ mb_install_cron() {
 # ── Command: run ─────────────────────────────────────────────────────────────
 
 mb_cmd_run() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
     mb_strategy_exists "$strategy" || mb_die "Strategy not found: $strategy"
-    local script="$(mb_strategy_dir "$strategy")/backup.sh"
+    local script
+    script="$(mb_strategy_dir "$strategy")/backup.sh"
     [ -x "$script" ] || mb_die "Backup script not executable: $script"
     mb_step "Running backup (strategy: ${strategy})"
     if "$script"; then
@@ -315,7 +319,8 @@ mb_cmd_run() {
 # ── Command: status ──────────────────────────────────────────────────────────
 
 mb_cmd_status() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     if [ -z "$strategy" ]; then
         mb_warn "No active strategy configured. Run 'mb backup init' first."
         return 0
@@ -361,9 +366,11 @@ mb_cmd_verify() {
 # ── Command: restore ─────────────────────────────────────────────────────────
 
 mb_cmd_restore() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
-    local script="$(mb_strategy_dir "$strategy")/restore.sh"
+    local script
+    script="$(mb_strategy_dir "$strategy")/restore.sh"
     [ -x "$script" ] || mb_die "Restore script not executable: $script"
     if [ $# -eq 0 ]; then
         mb_error "Specify --snapshot ID or --latest."
@@ -471,7 +478,8 @@ mb_cmd_backend_migrate() {
 # ── Command: cleanup ─────────────────────────────────────────────────────────
 
 mb_cmd_cleanup() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
     mb_load_strategy_env "$strategy"
     mb_step "Applying retention policy (strategy: ${strategy})"
@@ -517,7 +525,8 @@ mb_cmd_cleanup() {
 # ── Command: export ──────────────────────────────────────────────────────────
 
 mb_cmd_export() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
     mb_load_strategy_env "$strategy"
     local out="${1:-${MB_BACKUP_TMP}/mb-export-$(date '+%Y%m%d-%H%M%S')}"
@@ -587,7 +596,8 @@ mb_cmd_export() {
 # ── Command: list ────────────────────────────────────────────────────────────
 
 mb_cmd_list() {
-    local strategy="$(mb_get_active_strategy)"
+    local strategy
+    strategy="$(mb_get_active_strategy)"
     [ -z "$strategy" ] && mb_die "No active strategy. Run 'mb backup init' first."
     mb_load_strategy_env "$strategy"
     mb_step "Listing snapshots (strategy: ${strategy})"

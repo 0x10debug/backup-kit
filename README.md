@@ -1,5 +1,7 @@
 # VPS Backup Made Simple — Encrypted, Automated, Tested Recovery
 
+
+[![CI](https://github.com/0x10debug/backup-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/0x10debug/backup-kit/actions/workflows/ci.yml)
 Protect your self-hosted data with encrypted, automated backups designed for VPS and Docker. Pre-configured strategies for Restic and Kopia handle encryption, retention, and cleanup—just add your storage backend. Includes Docker volume backup scripts, one-command restore, and automated recovery drills that verify your backups actually work. Because a backup you've never tested is just a hope, not a backup.
 
 > **Already running apps on your VPS?** This is the safety net. Deploy your services with [compose-recipes](https://github.com/0x10debug/compose-recipes), then set up backup-kit to protect `/data/` — all your app data, encrypted, off-site, and tested.

@@ -6,6 +6,7 @@ set -euo pipefail
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
+# shellcheck disable=SC2034 # printed by the mb entrypoint after sourcing
 MB_BACKUP_VERSION="1.0.0"
 
 # Repository layout (resolved by mb, but provide sane defaults)
@@ -231,6 +232,7 @@ mb_env_source() {
 
 # ── Strategy helpers ─────────────────────────────────────────────────────────
 
+# shellcheck disable=SC2034 # consumed by the mb entrypoint strategy picker
 MB_AVAILABLE_STRATEGIES=(restic-s3 restic-sftp kopia-s3 borgmatic)
 
 mb_strategy_dir() {
@@ -257,7 +259,8 @@ mb_set_active_strategy() {
 mb_load_strategy_env() {
     # Source the strategy .env file (if present) into the current shell.
     local strategy="$1"
-    local envfile="$(mb_strategy_dir "$strategy")/.env"
+    local envfile
+    envfile="$(mb_strategy_dir "$strategy")/.env"
     if [ -f "$envfile" ]; then
         # shellcheck disable=SC1090
         source "$envfile"
